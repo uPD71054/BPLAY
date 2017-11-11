@@ -103,6 +103,7 @@ namespace slimDXTestConsole
                     }
                 }
 
+
                 audioBuffer[i] = new AudioBuffer();
                 audioBuffer[i].AudioData = new MemoryStream(data[i], true);
                 audioBuffer[i].Flags = BufferFlags.EndOfStream;
