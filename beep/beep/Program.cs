@@ -16,11 +16,12 @@ namespace slimDXTestConsole
         {
             Console.WriteLine("beep ver0.2.2");
             xaudio beep = new xaudio();
-            Console.WriteLine("Press ESC to exit...");
+            Console.Write("Press ESC to exit...");
             do
             {
                 // process
             } while (Console.ReadKey(true).Key != ConsoleKey.Escape);
+            Console.WriteLine();
         }
     }
 
@@ -31,7 +32,7 @@ namespace slimDXTestConsole
         private const int BITDEPTH = 8 /* 8bit/sample */;
         private const int CHANNELS = 1 /* monoral */;
         private const int NUMOFBUF = 4;
-        private const int NUMOFSAMPLE = 882;
+        private const int NUMOFSAMPLE = 4410;
 
         internal XAudio2 device;
         internal MasteringVoice masteringVoice;
@@ -98,20 +99,22 @@ namespace slimDXTestConsole
             sourceVoice.Start();
         }
 
-        int callCount = 0;
+        int cc = 0;
+        char[] bars = { '／', '―', '＼', '｜' };
         void sourceVoice_BufferEnd(object sender, ContextEventArgs e)
         {
-            Console.WriteLine("called!");
-
             for (int i = 0; i < NUMOFSAMPLE; i++)
             {
                 data[bufferCount][i] = 0;
             }
-            callCount += 16;
+            
             audioBuffer[bufferCount].AudioData.Position = 0;
             sourceVoice.SubmitSourceBuffer(audioBuffer[bufferCount]);
             bufferCount = ++bufferCount & 0x01;
-            Console.WriteLine("buffer {0}", bufferCount);
+            // カーソル位置を初期化
+            Console.SetCursorPosition(0, Console.CursorTop);
+            // 回転する棒を表示
+            Console.Write("{0}Press ESC to exit...", bars[cc++ % 4]);
         }
 
 
