@@ -17,15 +17,18 @@ namespace slimDXTestConsole
 
         static void Main(string[] args)
         {
-            Console.WriteLine("beep ver0.2.3");
-            xaudio beep = new xaudio();
+            Console.WriteLine("beep ver0.2.4");
+            fAudio beep = new fAudio();
             beep.bufferEndProc = callback;
+            beep.Start();
             Console.Write("Press ESC to exit...");
             do
             {
                 // process
             } while (Console.ReadKey(true).Key != ConsoleKey.Escape);
             Console.WriteLine();
+            beep.Stop();
+            beep.Dispose();
         }
 
         static private void callback()
@@ -35,9 +38,143 @@ namespace slimDXTestConsole
         }
     }
 
-    class xaudio
+
+    class fAudio : IDisposable
     {
-        // Const parametor
+        private const int SAMPLERATE = 44100 /* kHz */;
+        private const int BITDEPTH = 32/* 8bit/sample */;
+        private const int CHANNELS = 1 /* monoral */;
+        private const int NUMOFBUF = 2;
+        private const int NUMOFSAMPLE = 882;
+
+        internal XAudio2 device;
+        internal MasteringVoice masteringVoice;
+        internal WaveFormat waveFormat;
+        internal SourceVoice sourceVoice;
+        internal AudioBuffer[] audioBuffer;
+        internal byte[][] data;
+        internal int bufferCount;
+
+        public delegate void audioCallback();
+        public audioCallback bufferEndProc;
+
+
+
+        public fAudio()
+        {
+            device = new XAudio2();
+            masteringVoice = new MasteringVoice(device);
+
+            waveFormat = new WaveFormat();
+            {
+                waveFormat.Channels = CHANNELS;
+                waveFormat.SamplesPerSecond = SAMPLERATE;
+                waveFormat.BitsPerSample = BITDEPTH;
+                waveFormat.BlockAlignment = (short)(waveFormat.BitsPerSample / 8 * waveFormat.Channels);
+                waveFormat.AverageBytesPerSecond = waveFormat.SamplesPerSecond * waveFormat.BlockAlignment;
+                waveFormat.FormatTag = WaveFormatTag.IeeeFloat;
+            }
+
+            sourceVoice = new SourceVoice(device, waveFormat);
+            sourceVoice.BufferEnd += sourceVoice_BufferEnd;
+
+            audioBuffer = new AudioBuffer[NUMOFBUF];
+            data = new byte[NUMOFBUF][];
+            for (int i = 0; i < NUMOFBUF; i++)
+            {
+                data[i] = new byte[NUMOFSAMPLE * waveFormat.BlockAlignment];
+                byte[] buff;
+                for (int j = 0; j < data[i].Length; j += waveFormat.BlockAlignment)
+                {
+                    buff = BitConverter.GetBytes(pulse(2000 - 1000 * i));
+                    data[i][j+0] = buff[0];
+                    data[i][j+1] = buff[1];
+                    data[i][j+2] = buff[2];
+                    data[i][j+3] = buff[3];
+                }
+                audioBuffer[i] = new AudioBuffer();
+                audioBuffer[i].AudioData = new MemoryStream(data[i], true);
+                audioBuffer[i].Flags = BufferFlags.EndOfStream;
+                audioBuffer[i].AudioBytes = data[i].Length;
+                audioBuffer[i].LoopCount = 0;
+
+                audioBuffer[i].AudioData.Position = 0;
+                sourceVoice.SubmitSourceBuffer(audioBuffer[i]);
+            }
+            bufferCount = 0;
+        }
+
+        public void Start()
+        {
+            sourceVoice.Start();
+        }
+
+        public void Stop()
+        {
+            sourceVoice.Stop();
+        }
+
+        void sourceVoice_BufferEnd(object sender, ContextEventArgs e)
+        {
+            for (int i = 0; i < data[bufferCount].Length; i++)
+            {
+                data[bufferCount][i] = 0;
+            }
+
+            audioBuffer[bufferCount].AudioData.Position = 0;
+            sourceVoice.SubmitSourceBuffer(audioBuffer[bufferCount]);
+            bufferCount = ++bufferCount & 0x01;
+
+            bufferEndProc();
+        }
+
+
+        // pulse generator
+        internal double phase = 0.0;
+        internal float pulse(double helz)
+        {
+            phase += helz / SAMPLERATE;
+            phase -= Math.Floor(phase);
+            if (phase > 0.5)
+            {
+                return 0.5f;
+            }
+            else
+            {
+                return 0.0f;
+            }
+        }
+
+        #region IDisposable Support
+        private bool disposedValue = false;
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    for (int i = 0; i < audioBuffer.Length; i++)
+                    {
+                        audioBuffer[i].Dispose();
+                    }
+                    sourceVoice.Dispose();
+
+                    masteringVoice.Dispose();
+                    device.Dispose();
+                }
+                disposedValue = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+        }
+        #endregion
+    }
+
+    class iAudio :IDisposable
+    {
         private const int SAMPLERATE = 44100 /* kHz */;
         private const int BITDEPTH = 16/* 8bit/sample */;
         private const int CHANNELS = 1 /* monoral */;
@@ -57,7 +194,7 @@ namespace slimDXTestConsole
 
 
 
-        public xaudio()
+        public iAudio()
         {
             device = new XAudio2();
             masteringVoice = new MasteringVoice(device);
@@ -114,7 +251,16 @@ namespace slimDXTestConsole
                 sourceVoice.SubmitSourceBuffer(audioBuffer[i]);
             }
             bufferCount = 0;
+        }
+
+        public void Start()
+        {
             sourceVoice.Start();
+        }
+
+        public void Stop()
+        {
+            sourceVoice.Stop();
         }
 
         void sourceVoice_BufferEnd(object sender, ContextEventArgs e)
@@ -148,5 +294,31 @@ namespace slimDXTestConsole
             }
         }
 
+        #region IDisposable Support
+        private bool disposedValue = false;
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    for (int i = 0; i < audioBuffer.Length; i++)
+                    {
+                        audioBuffer[i].Dispose();
+                    }
+                    sourceVoice.Dispose();
+
+                    masteringVoice.Dispose();
+                    device.Dispose();
+                }
+                disposedValue = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+        }
+        #endregion
     }
 }
