@@ -16,12 +16,11 @@ namespace slimDXTestConsole
         static char[] bars = { '／', '―', '＼', '｜' };
 
         static void Main(string[] args)
-        {
-            Console.WriteLine("beep ver0.2.4");
+        {    
+            Console.WriteLine("beep ver0.3.0");
             fAudio beep = new fAudio();
             beep.bufferEndProc = callback;
             beep.Start();
-            Console.Write("Press ESC to exit...");
             do
             {
                 // process
@@ -29,6 +28,7 @@ namespace slimDXTestConsole
             Console.WriteLine();
             beep.Stop();
             beep.Dispose();
+            
         }
 
         static private void callback()
@@ -39,13 +39,159 @@ namespace slimDXTestConsole
     }
 
 
-    class fAudio : IDisposable
+    public class Square
+    {
+        private const int TABLE_LENGTH = 10;
+        private const int mask = (1 << TABLE_LENGTH) - 1;
+        private const int decimalPlaces = sizeof(int) * 8 - TABLE_LENGTH;
+
+        private int samplingRate;
+        private uint phase;         // 10bit:22bit fixed decimal point
+        private uint delta;
+        private byte[] buffer;
+        private float[][] table;
+        private double freq;
+        private double[] noteFreq;
+        private int note;
+
+        public Square()
+        {
+            phase = 0;
+            samplingRate = 44100;
+            buffer = new byte[sizeof(float)];
+
+            table = new float[128][];
+            noteFreq = new double[128];
+            for (int i = 0; i < table.Length; i++)
+            {
+                noteFreq[i] = 440.0 * Math.Pow(2.0, (i - 69) / 12.0);
+                table[i] = mktable(noteFreq[i]);
+            }
+        }
+
+        public double Frequency
+        {
+            get { return freq; }
+            set
+            {
+                freq = value;
+                delta = (uint)(freq / 44100 * (1 << TABLE_LENGTH) * (1 << decimalPlaces));
+            }
+        }
+
+        public int Note
+        {
+            get { return note; }
+            set
+            {
+                note = value;
+                delta = (uint)(noteFreq[note] / 44100 * (1 << TABLE_LENGTH) * (1 << decimalPlaces));
+            }
+        }
+
+
+
+        public byte[] getByte()
+        {
+            linearInterp();
+            phase += delta;
+            return buffer;
+        }
+
+        private float[] mktable(double frequency)
+        {
+            float[] ret = new float[1 << TABLE_LENGTH];
+            // array initialize
+            for (int i = 0; i < ret.Length; i++)
+            {
+                ret[i] = 0;
+            }
+            // additive synthesis
+            for (int n = 1; n < (samplingRate / 2) / frequency; n += 2)
+            {
+                for (int i = 0; i < ret.Length; i++)
+                {
+                    ret[i] += (float)Math.Sin(2.0d * Math.PI * n * i / ret.Length) / n;
+                }
+            }
+            // normalize
+            float max = ret.Max();
+            for (int i = 0; i < ret.Length; i++)
+            {
+                ret[i] = ret[i] / max;
+            }
+            return ret;
+        }
+
+        private float dx, dy;
+        private void linearInterp()
+        {
+            dx = (float)(phase & 0xFFFF) / (1 << decimalPlaces);
+            dy = table[note][((phase >> decimalPlaces) + 1) & mask] - table[note][phase >> decimalPlaces];
+            buffer = BitConverter.GetBytes(table[note][phase >> decimalPlaces] + dx * dy);
+        }
+
+    }
+
+    public class Sin
+    {
+        private const int TABLE_LENGTH = 10;
+        private const int mask = (1 << TABLE_LENGTH) - 1;
+        private const int decimalPlaces = sizeof(int) * 8 - TABLE_LENGTH;
+
+        private uint phase;         // 10bit:22bit fixed decimal point
+        private uint delta;         
+        private byte[] buffer;
+        private float[] table;
+        private double freq;
+        
+
+        public Sin()
+        {
+            phase = 0;
+            table = new float[1 << TABLE_LENGTH];
+            buffer = new byte[sizeof(float)];
+            for (int i = 0; i < table.Length; i++)
+            {
+                table[i] = (float)Math.Sin(2.0d * Math.PI * i / table.Length);
+            }
+        }
+
+        public double Frequency
+        {
+            get { return freq; }
+            set
+            {
+                freq = value;
+                delta = (uint)(freq / 44100 * table.Length * (1 << decimalPlaces));
+            }
+        }
+
+        public byte[] getByte()
+        {
+            linearInterp();
+            phase += delta;
+            return buffer;         
+        }
+
+
+        private float dx, dy;
+        private void linearInterp()
+        {
+            dx = (float)(phase & 0xFFFF) / (1 << decimalPlaces);
+            dy = table[((phase >> decimalPlaces) + 1) & mask] - table[phase >> decimalPlaces];
+            buffer = BitConverter.GetBytes(table[phase >> decimalPlaces] + dx * dy);
+        }
+
+    }
+
+    public class fAudio : IDisposable
     {
         private const int SAMPLERATE = 44100 /* kHz */;
         private const int BITDEPTH = 32/* 8bit/sample */;
         private const int CHANNELS = 1 /* monoral */;
         private const int NUMOFBUF = 2;
-        private const int NUMOFSAMPLE = 882;
+        private const int NUMOFSAMPLE = 882 * 2;
 
         internal XAudio2 device;
         internal MasteringVoice masteringVoice;
@@ -55,6 +201,8 @@ namespace slimDXTestConsole
         internal byte[][] data;
         internal int bufferCount;
 
+        private Sin s = new Sin();
+        private Square sq = new Square();
         public delegate void audioCallback();
         public audioCallback bufferEndProc;
 
@@ -84,9 +232,10 @@ namespace slimDXTestConsole
             {
                 data[i] = new byte[NUMOFSAMPLE * waveFormat.BlockAlignment];
                 byte[] buff;
+                sq.Note = (95 - 12 * i);
                 for (int j = 0; j < data[i].Length; j += waveFormat.BlockAlignment)
                 {
-                    buff = BitConverter.GetBytes(pulse(2000 - 1000 * i));
+                    buff = sq.getByte();
                     data[i][j+0] = buff[0];
                     data[i][j+1] = buff[1];
                     data[i][j+2] = buff[2];
